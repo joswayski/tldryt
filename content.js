@@ -59,56 +59,56 @@ function isAlreadyViewed(button) {
   return button.getAttribute("aria-pressed") === "true";
 }
 
+const processed = new Set();
+
 function markTestFilesAsViewed() {
   const diffs = getFileDiffs();
   let marked = 0;
-  let skipped = 0;
-
-  console.log(`[TLDR PR] Found ${diffs.length} file diff(s)`);
 
   diffs.forEach((diff) => {
+    if (processed.has(diff.id)) return;
+
     const names = getFileNames(diff);
     if (names.length === 0) return;
 
     const hasTestFile = names.some(isTestFile);
-    console.log(
-      `[TLDR PR] ${names.join(" → ")} — ${hasTestFile ? "TEST FILE" : "skipping"}`
-    );
-    if (!hasTestFile) return;
+    if (!hasTestFile) {
+      processed.add(diff.id);
+      return;
+    }
 
     const btn = getViewedButton(diff);
-    if (!btn) {
-      console.log(`[TLDR PR] No viewed button found for ${names.join(" → ")}`);
-      return;
-    }
+    if (!btn) return;
 
     if (isAlreadyViewed(btn)) {
-      skipped++;
+      processed.add(diff.id);
       return;
     }
 
+    console.log(`[TLDR PR] Marking as viewed: ${names.join(" → ")}`);
     btn.click();
+    processed.add(diff.id);
     marked++;
   });
 
-  if (marked > 0 || skipped > 0) {
-    showToast(marked, skipped);
-  } else {
-    console.log("[TLDR PR] No test files found to mark");
+  if (marked > 0) {
+    showToast(marked);
   }
 }
 
-function showToast(marked, skipped) {
-  const existing = document.getElementById("tldr-pr-toast");
-  if (existing) existing.remove();
+let toastTimeout;
 
+function showToast(marked) {
+  const existing = document.getElementById("tldr-pr-toast");
+  if (existing) {
+    clearTimeout(toastTimeout);
+    existing.remove();
+  }
+
+  const total = processed.size;
   const toast = document.createElement("div");
   toast.id = "tldr-pr-toast";
-
-  let msg = `TLDR PR: Marked ${marked} test file${marked !== 1 ? "s" : ""} as viewed`;
-  if (skipped > 0) msg += ` (${skipped} already viewed)`;
-
-  toast.textContent = msg;
+  toast.textContent = `TLDR PR: Marked ${marked} test file${marked !== 1 ? "s" : ""} as viewed`;
   Object.assign(toast.style, {
     position: "fixed",
     bottom: "20px",
@@ -126,14 +126,14 @@ function showToast(marked, skipped) {
   });
 
   document.body.appendChild(toast);
-  setTimeout(() => {
+  toastTimeout = setTimeout(() => {
     toast.style.opacity = "0";
     setTimeout(() => toast.remove(), 300);
   }, 3000);
 }
 
-function waitForDiffsAndRun() {
-  console.log("[TLDR PR] Extension loaded, waiting for diffs...");
+function start() {
+  console.log("[TLDR PR] Extension loaded, watching for diffs...");
 
   chrome.storage.sync.get({ enabled: true }, ({ enabled }) => {
     if (!enabled) {
@@ -141,22 +141,20 @@ function waitForDiffsAndRun() {
       return;
     }
 
-    const observer = new MutationObserver((_mutations, obs) => {
-      const diffs = getFileDiffs();
-      if (diffs.length > 0) {
-        obs.disconnect();
-        setTimeout(markTestFilesAsViewed, 500);
-      }
-    });
+    // Debounce so rapid DOM mutations batch into one scan
+    let scanTimer;
+    function scheduleScan() {
+      clearTimeout(scanTimer);
+      scanTimer = setTimeout(markTestFilesAsViewed, 300);
+    }
 
+    // Keep observing — GitHub lazily renders diffs as you scroll
+    const observer = new MutationObserver(scheduleScan);
     observer.observe(document.body, { childList: true, subtree: true });
 
-    const diffs = getFileDiffs();
-    if (diffs.length > 0) {
-      observer.disconnect();
-      setTimeout(markTestFilesAsViewed, 500);
-    }
+    // Initial scan
+    scheduleScan();
   });
 }
 
-waitForDiffsAndRun();
+start();
