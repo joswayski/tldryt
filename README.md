@@ -1,4 +1,4 @@
-# TLDR PR — Auto-View Test Files
+# Too Long, Didn't Read (Your Tests)
 
 A Chrome extension that automatically marks test files as "Viewed" when reviewing pull requests on GitHub.
 
@@ -15,10 +15,13 @@ Files matching any of these are auto-marked as viewed:
 
 ## Install
 
-1. Clone this repo
+1. Clone this repo:
+   ```bash
+   git clone https://github.com/joswayski/tldryt.git
+   ```
 2. Open `chrome://extensions` in Chrome
 3. Enable **Developer mode** (toggle in the top right)
-4. Click **Load unpacked** and select this folder
+4. Click **Load unpacked** and select the `tldryt` folder you just cloned
 5. Navigate to any GitHub PR's "Files changed" tab — test files will be auto-marked
 
 ## Usage
