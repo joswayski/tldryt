@@ -132,8 +132,46 @@ function showToast(marked) {
   }, 3000);
 }
 
+const FILES_PATH_RE = /\/pull\/\d+\/(files|changes)/;
+
+function isFilesChangedPage() {
+  return FILES_PATH_RE.test(location.pathname);
+}
+
+let observer;
+let scanTimer;
+
+function scheduleScan() {
+  clearTimeout(scanTimer);
+  scanTimer = setTimeout(markTestFilesAsViewed, 300);
+}
+
+function activate() {
+  if (observer) return;
+  console.log("[TLDR PR] On files changed page, watching for diffs...");
+  processed.clear();
+  observer = new MutationObserver(scheduleScan);
+  observer.observe(document.body, { childList: true, subtree: true });
+  scheduleScan();
+}
+
+function deactivate() {
+  if (!observer) return;
+  observer.disconnect();
+  observer = null;
+  clearTimeout(scanTimer);
+}
+
+function onNavigation() {
+  if (isFilesChangedPage()) {
+    activate();
+  } else {
+    deactivate();
+  }
+}
+
 function start() {
-  console.log("[TLDR PR] Extension loaded, watching for diffs...");
+  console.log("[TLDR PR] Extension loaded");
 
   chrome.storage.sync.get({ enabled: true }, ({ enabled }) => {
     if (!enabled) {
@@ -141,19 +179,25 @@ function start() {
       return;
     }
 
-    // Debounce so rapid DOM mutations batch into one scan
-    let scanTimer;
-    function scheduleScan() {
-      clearTimeout(scanTimer);
-      scanTimer = setTimeout(markTestFilesAsViewed, 300);
-    }
+    // GitHub SPA uses pushState/replaceState for navigation, which don't
+    // fire popstate. Patch them so we get notified of every route change.
+    const originalPushState = history.pushState.bind(history);
+    const originalReplaceState = history.replaceState.bind(history);
 
-    // Keep observing — GitHub lazily renders diffs as you scroll
-    const observer = new MutationObserver(scheduleScan);
-    observer.observe(document.body, { childList: true, subtree: true });
+    history.pushState = function (...args) {
+      originalPushState(...args);
+      onNavigation();
+    };
+    history.replaceState = function (...args) {
+      originalReplaceState(...args);
+      onNavigation();
+    };
+    window.addEventListener("popstate", onNavigation);
 
-    // Initial scan
-    scheduleScan();
+    // Also handle turbo:load for GitHub's Turbo-driven navigations
+    document.addEventListener("turbo:load", onNavigation);
+
+    onNavigation();
   });
 }
 
