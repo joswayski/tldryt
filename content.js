@@ -13,18 +13,42 @@ function getFileDiffs() {
   return document.querySelectorAll('[id^="diff-"][role="region"]');
 }
 
-function getFileName(diffEl) {
-  const heading = diffEl.querySelector(
+function getFileNames(diffEl) {
+  const names = [];
+
+  // For renamed files, the sr-only span has "X renamed to Y"
+  const srOnly = diffEl.querySelector(
+    '[class*="DiffFileHeader-module__file-name"] .sr-only'
+  );
+  if (srOnly) {
+    const text = srOnly.textContent.trim();
+    const parts = text.split(/\s+renamed to\s+/);
+    for (const p of parts) {
+      const clean = p.replace(/\u200e/g, "").trim();
+      if (clean) names.push(clean);
+    }
+    if (names.length > 0) return names;
+  }
+
+  // Standard single file name — grab from the <code> inside the heading
+  const code = diffEl.querySelector(
     '[class*="DiffFileHeader-module__file-name"] code'
   );
-  if (heading) return heading.textContent.replace(/\u200e/g, "").trim();
+  if (code) {
+    const clean = code.textContent.replace(/\u200e/g, "").trim();
+    if (clean) names.push(clean);
+    return names;
+  }
 
   const link = diffEl.querySelector(
     '[class*="DiffFileHeader-module__file-name"] a'
   );
-  if (link) return link.textContent.replace(/\u200e/g, "").trim();
+  if (link) {
+    const clean = link.textContent.replace(/\u200e/g, "").trim();
+    if (clean) names.push(clean);
+  }
 
-  return null;
+  return names;
 }
 
 function getViewedButton(diffEl) {
@@ -40,14 +64,23 @@ function markTestFilesAsViewed() {
   let marked = 0;
   let skipped = 0;
 
-  diffs.forEach((diff) => {
-    const filename = getFileName(diff);
-    if (!filename) return;
+  console.log(`[TLDR PR] Found ${diffs.length} file diff(s)`);
 
-    if (!isTestFile(filename)) return;
+  diffs.forEach((diff) => {
+    const names = getFileNames(diff);
+    if (names.length === 0) return;
+
+    const hasTestFile = names.some(isTestFile);
+    console.log(
+      `[TLDR PR] ${names.join(" → ")} — ${hasTestFile ? "TEST FILE" : "skipping"}`
+    );
+    if (!hasTestFile) return;
 
     const btn = getViewedButton(diff);
-    if (!btn) return;
+    if (!btn) {
+      console.log(`[TLDR PR] No viewed button found for ${names.join(" → ")}`);
+      return;
+    }
 
     if (isAlreadyViewed(btn)) {
       skipped++;
@@ -60,6 +93,8 @@ function markTestFilesAsViewed() {
 
   if (marked > 0 || skipped > 0) {
     showToast(marked, skipped);
+  } else {
+    console.log("[TLDR PR] No test files found to mark");
   }
 }
 
@@ -98,8 +133,13 @@ function showToast(marked, skipped) {
 }
 
 function waitForDiffsAndRun() {
+  console.log("[TLDR PR] Extension loaded, waiting for diffs...");
+
   chrome.storage.sync.get({ enabled: true }, ({ enabled }) => {
-    if (!enabled) return;
+    if (!enabled) {
+      console.log("[TLDR PR] Extension is disabled");
+      return;
+    }
 
     const observer = new MutationObserver((_mutations, obs) => {
       const diffs = getFileDiffs();
@@ -111,7 +151,6 @@ function waitForDiffsAndRun() {
 
     observer.observe(document.body, { childList: true, subtree: true });
 
-    // Also try immediately in case diffs are already loaded
     const diffs = getFileDiffs();
     if (diffs.length > 0) {
       observer.disconnect();
